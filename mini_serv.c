@@ -78,23 +78,16 @@ void send_to_all(int sender_fd, char *msg)
 
 void add_client(int sockfd)
 {
-	int connfd;
-	struct sockaddr_in cli;
-	socklen_t len = sizeof(cli);
+	int connfd = accept(sockfd, NULL, NULL);
 	char msg[100];
 
-	connfd = accept(sockfd, (struct sockaddr *)&cli, &len);
 	if (connfd < 0)
 		return;
-
 	if (connfd > max_fd)
 		max_fd = connfd;
-
 	client_ids[connfd] = next_id++;
 	client_bufs[connfd] = NULL;
-
 	FD_SET(connfd, &current_set);
-
 	sprintf(msg, "server: client %d just arrived\n", client_ids[connfd]);
 	send_to_all(connfd, msg);
 }
@@ -161,35 +154,26 @@ int main(int argc, char **argv)
 	while (1)
 	{
 		read_set = write_set = current_set;
-
 		if (select(max_fd + 1, &read_set, &write_set, NULL, NULL) < 0)
 			continue;
-
 		for (int fd = 0; fd <= max_fd; fd++)
 		{
 			if (!FD_ISSET(fd, &read_set))
 				continue;
-
 			if (fd == sockfd)
 			{
 				add_client(sockfd);
 				break;
 			}
-			else
+			int ret = recv(fd, buffer, 1000, 0);
+			if (ret <= 0)
 			{
-				int ret = recv(fd, buffer, 1000, 0);
-				if (ret <= 0)
-				{
-					remove_client(fd);
-					break;
-				}
-				else
-				{
-					buffer[ret] = '\0';
-					client_bufs[fd] = str_join(client_bufs[fd], buffer);
-					send_message(fd);
-				}
+				remove_client(fd);
+				break;
 			}
+			buffer[ret] = '\0';
+			client_bufs[fd] = str_join(client_bufs[fd], buffer);
+			send_message(fd);
 		}
 	}
 
