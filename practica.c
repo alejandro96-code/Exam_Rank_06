@@ -8,15 +8,9 @@
 #include <sys/select.h>
 #include <netinet/in.h>
 
-int client_ids[1024];
-char *client_bufs[1024];
-int max_fd = 0;
-int next_id = 0;
-fd_set read_set, write_set, current_set;
-
-void fatal_error(void)
+void fatal_error()
 {
-	write(2, "Fatal error\n", 12);
+	write(1, "Fatal error\n" , 12);
 	exit(1);
 }
 
@@ -49,8 +43,8 @@ int extract_message(char **buf, char **msg)
 
 char *str_join(char *buf, char *add)
 {
-	char *newbuf;
-	int len;
+	char	*newbuf;
+	int		len;
 
 	if (buf == 0)
 		len = 0;
@@ -67,60 +61,67 @@ char *str_join(char *buf, char *add)
 	return (newbuf);
 }
 
-void send_to_all(int sender_fd, char *msg)
+int max_fd = 0;
+int sockfd = 0;
+fd_set read_set, write_set, current_set;
+
+void envio_general(int envio_fd, char *msg)
 {
-	for (int fd = 0; fd <= max_fd; fd++)
+for (int fd = 0; fd <= max_fd; fd++)
 	{
-		if (FD_ISSET(fd, &write_set) && fd != sender_fd)
+		if (FD_ISSET(fd, &current_set) && fd != envio_fd && fd != sockfd)
 			send(fd, msg, strlen(msg), 0);
 	}
 }
 
-void add_client(int sockfd)
+int clients_ids[1024];
+char *clients_bufs[1024];
+int next_id = 0;
+
+void anadir_cliente(int sockfd)
 {
-	int connfd = accept(sockfd, NULL, NULL);
+	int peticion = accept(sockfd, NULL, NULL);
 	char msg[100];
 
-	if (connfd < 0)
+	if(peticion < 0)
 		return;
-	if (connfd > max_fd)
-		max_fd = connfd;
-	client_ids[connfd] = next_id++;
-	client_bufs[connfd] = NULL;
-	FD_SET(connfd, &current_set);
-	sprintf(msg, "server: client %d just arrived\n", client_ids[connfd]);
-	send_to_all(connfd, msg);
+	if(peticion > max_fd)
+		max_fd = peticion;
+	
+	clients_ids[peticion] = next_id++;
+	clients_bufs[peticion] = NULL;
+	FD_SET(peticion, &current_set);
+	sprintf(msg, "server: client %d just arrived\n", clients_ids[peticion]);
+	envio_general(peticion, msg);
 }
 
-void remove_client(int fd)
+void eliminar_cliente(int fd)
 {
 	char msg[100];
-
-	sprintf(msg, "server: client %d just left\n", client_ids[fd]);
-	send_to_all(fd, msg);
+	sprintf(msg, "server: client %d just left\n", clients_ids[fd]);
+	envio_general(fd, msg);
 
 	FD_CLR(fd, &current_set);
 	close(fd);
-	free(client_bufs[fd]);
-	client_bufs[fd] = NULL;
+	free(clients_bufs[fd]);
+	clients_bufs[fd] = NULL;
 }
 
-void send_message(int fd)
+void enviar_mensaje(int fd)
 {
 	char *msg;
 	char buffer[200];
-
-	while (extract_message(&client_bufs[fd], &msg))
+	while(extract_message(&clients_bufs[fd], &msg))
 	{
-		sprintf(buffer, "client %d: %s", client_ids[fd], msg);
-		send_to_all(fd, buffer);
+		sprintf(buffer, "client %d: %s", clients_ids[fd], msg);
+		envio_general(fd, buffer);
 		free(msg);
 	}
 }
 
 int main(int argc, char **argv)
 {
-	int sockfd, port;
+	int port;
 	struct sockaddr_in servaddr;
 	char buffer[1001];
 
@@ -132,7 +133,7 @@ int main(int argc, char **argv)
 
 	port = atoi(argv[1]);
 
-	sockfd = socket(AF_INET, SOCK_STREAM, 0);
+	sockfd = socket(AF_INET, SOCK_STREAM, 0); 
 	if (sockfd == -1)
 		fatal_error();
 
@@ -140,18 +141,18 @@ int main(int argc, char **argv)
 	FD_ZERO(&current_set);
 	FD_SET(sockfd, &current_set);
 
-	bzero(&servaddr, sizeof(servaddr));
-	servaddr.sin_family = AF_INET;
-	servaddr.sin_addr.s_addr = htonl(2130706433); // 127.0.0.1
-	servaddr.sin_port = htons(port);
+	bzero(&servaddr, sizeof(servaddr)); 
+	servaddr.sin_family = AF_INET; 
+	servaddr.sin_addr.s_addr = htonl(2130706433); //127.0.0.1
+	servaddr.sin_port = htons(port); 
 
-	if ((bind(sockfd, (const struct sockaddr *)&servaddr, sizeof(servaddr))) != 0)
+	if ((bind(sockfd, (const struct sockaddr *)&servaddr, sizeof(servaddr))) != 0) 
 		fatal_error();
 
 	if (listen(sockfd, 10) != 0)
 		fatal_error();
-
-	while (1)
+	
+		while (1)
 	{
 		read_set = write_set = current_set;
 		if (select(max_fd + 1, &read_set, &write_set, NULL, NULL) < 0)
@@ -162,20 +163,23 @@ int main(int argc, char **argv)
 				continue;
 			if (fd == sockfd)
 			{
-				add_client(sockfd);
-				break;
+				anadir_cliente(sockfd);
 			}
-			int ret = recv(fd, buffer, 1000, 0);
-			if (ret <= 0)
+			else
 			{
-				remove_client(fd);
-				break;
+				int ret = recv(fd, buffer, 1000, 0);
+				if (ret <= 0)
+				{
+					eliminar_cliente(fd);
+				}
+				else
+				{
+					buffer[ret] = '\0';
+					clients_bufs[fd] = str_join(clients_bufs[fd], buffer);
+					enviar_mensaje(fd);
+				}
 			}
-			buffer[ret] = '\0';
-			client_bufs[fd] = str_join(client_bufs[fd], buffer);
-			send_message(fd);
 		}
 	}
-
 	return 0;
 }
