@@ -1,11 +1,11 @@
 #include <errno.h>
 #include <string.h>
 #include <unistd.h>
-#include <stdlib.h>
-#include <stdio.h>
 #include <netdb.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <stdlib.h>
+#include <stdio.h>
 #include <sys/select.h>
 
 void fatal_error() {
@@ -13,7 +13,6 @@ void fatal_error() {
 	exit(1);
 }
 
-// ========== COPIAR DEL SUBJECT ==========
 int extract_message(char **buf, char **msg)
 {
 	char	*newbuf;
@@ -60,84 +59,90 @@ char *str_join(char *buf, char *add)
 	strcat(newbuf, add);
 	return (newbuf);
 }
-// ========================================
 
-// GLOBALS (esto es lo que trackeas)
-int max_fd, sockfd, ids[1024], next_id;
-char *bufs[1024];
-fd_set current_set, read_set;
+int max_fd, sockfd, client_ids[1024], next_id;
+char *client_buf[1024];
+fd_set read_set, current_set;
 
-// BROADCAST: envia a todos excepto "except" y "sockfd"
-void broadcast(int except, char *msg) {
-	for (int fd = 0; fd <= max_fd; fd++)
-		if (FD_ISSET(fd, &current_set) && fd != except && fd != sockfd)
-			send(fd, msg, strlen(msg), 0);
+void broadcast(int except, char *msg)
+{
+	for(int fd = 0; fd <= max_fd; fd++){
+		if(FD_ISSET(fd, &current_set) && fd != except && fd != sockfd){
+			send(fd , msg, strlen(msg), 0);
+		}
+	}
 }
 
-// ADD: accept + asignar id + anunciar llegada
-void add_client() {
-	int peticion = accept(sockfd, 0, 0);
+void add_client()
+{
+	int peticion = accept(sockfd,0,0);
 	char msg[100];
-	
-	if (peticion < 0) return;
-	if (peticion > max_fd) max_fd = peticion;
-	ids[peticion] = next_id++;
-	bufs[peticion] = 0;
+	if(peticion < 0)
+		return;
+	if(peticion > max_fd)
+		max_fd = peticion;
+	client_ids[peticion] = next_id++;
+	client_buf[peticion] = 0;
 	FD_SET(peticion, &current_set);
-	sprintf(msg, "server: client %d just arrived\n", ids[peticion]);
+	sprintf(msg, "server: client %d just arrived\n", client_ids[peticion]);
 	broadcast(peticion, msg);
 }
 
-// REMOVE: anunciar salida + limpiar + cerrar
-void remove_client(int fd) {
+void remove_client(int fd)
+{
 	char msg[100];
-	sprintf(msg, "server: client %d just left\n", ids[fd]);
+	sprintf(msg, "server: client %d just left\n", client_ids[fd]);
 	broadcast(fd, msg);
 	FD_CLR(fd, &current_set);
 	close(fd);
-	free(bufs[fd]);
-	bufs[fd] = 0;
+	free(client_buf[fd]);
+	client_buf[fd] = 0;
 }
 
-// RELAY: extraer y reenviar cada mensaje
-void send_mensage(int fd) {
-	char *msg, tmp[200];
-	while (extract_message(&bufs[fd], &msg))
+void send_message(int fd)
+{
+	char *msg, *tmp;
+	while(extract_message(&client_buf[fd], &msg))
 	{
-		sprintf(tmp, "client %d: %s", ids[fd], msg);
+		tmp = malloc(strlen(msg) + 50);
+		if(!tmp)
+			fatal_error();
+		sprintf(tmp, "client %d: %s", client_ids[fd], msg);
 		broadcast(fd, tmp);
 		free(msg);
+		free(tmp);
 	}
 }
 
 int main(int argc, char **argv) {
+
 	struct sockaddr_in servaddr;
-	char buf[1001];
-	
-	if (argc != 2) {
-		write(2, "Wrong number of arguments\n", 26);
+	char buffer[1001];
+
+	if(argc != 2){
+		write(2,"Wrong number of arguments\n", 26);
 		exit(1);
-	}
-	
-	// SETUP: socket + bind + listen
+	} 
 	sockfd = socket(AF_INET, SOCK_STREAM, 0); 
-	if (sockfd == -1)
+	if (sockfd == -1) { 
 		fatal_error();
+	}
+
 	max_fd = sockfd;
 	FD_ZERO(&current_set);
 	FD_SET(sockfd, &current_set);
-	
+
 	bzero(&servaddr, sizeof(servaddr)); 
 	servaddr.sin_family = AF_INET; 
-	servaddr.sin_addr.s_addr = htonl(2130706433); // 127.0.0.1
+	servaddr.sin_addr.s_addr = htonl(2130706433); //127.0.0.1
 	servaddr.sin_port = htons(atoi(argv[1])); 
-	
-	if ((bind(sockfd, (const struct sockaddr *)&servaddr, sizeof(servaddr))) != 0)
+  
+	if ((bind(sockfd, (const struct sockaddr *)&servaddr, sizeof(servaddr))) != 0) { 
 		fatal_error();
-	if (listen(sockfd, 10) != 0)
-		fatal_error();
-	
-	// LOOP: select + handle cada fd
+	} 
+	if (listen(sockfd, 10) != 0) {
+		fatal_error(); 
+	}
 	while (1) {
 		read_set = current_set;
 		if (select(max_fd + 1, &read_set, 0, 0, 0) < 0) continue;
@@ -148,13 +153,13 @@ int main(int argc, char **argv) {
 			if (fd == sockfd) {
 				add_client();
 			} else {
-				int ret = recv(fd, buf, 1000, 0);
+				int ret = recv(fd, buffer, 1000, 0);
 				if (ret <= 0)
 					remove_client(fd);
 				else {
-					buf[ret] = 0;
-					bufs[fd] = str_join(bufs[fd], buf);
-					send_mensage(fd);
+					buffer[ret] = 0;
+					client_buf[fd] = str_join(client_buf[fd], buffer);
+					send_message(fd);
 				}
 			}
 		}
